@@ -18,4 +18,12 @@ public class KafkaTopicConfig {
                 .replicas(1)     // we only have one Kafka broker
                 .build();
     }
+
+    @Bean
+    public NewTopic disruptionsTopic() {
+        return TopicBuilder.name(KafkaTopics.DISRUPTIONS)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
 }

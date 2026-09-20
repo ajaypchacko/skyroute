@@ -40,13 +40,30 @@ public class Flight {
     @Column(name = "delay_minutes", nullable = false)
     private int delayMinutes;
 
-    // Time of the newest event applied to this flight (used in Phase 3). Can be null.
+    // Time of the newest event applied to this flight. Can be null (no event yet).
     @Column(name = "last_event_at")
     private Instant lastEventAt;
 
     // JPA needs an empty constructor to create objects itself. "protected" stops
     // the rest of our code from using it by accident.
     protected Flight() {
+    }
+
+    /**
+     * Out-of-order guard: an event is "stale" if it is not NEWER than the last
+     * event we already applied. This also makes a repeated (redelivered) event harmless.
+     */
+    public boolean isStale(Instant eventTime) {
+        return lastEventAt != null && !eventTime.isAfter(lastEventAt);
+    }
+
+    /**
+     * Applies a new state and remembers the time of the event that caused it.
+     */
+    public void applyUpdate(String newStatus, int newDelayMinutes, Instant eventTime) {
+        this.status = newStatus;
+        this.delayMinutes = newDelayMinutes;
+        this.lastEventAt = eventTime;
     }
 
     public Long getId() {
