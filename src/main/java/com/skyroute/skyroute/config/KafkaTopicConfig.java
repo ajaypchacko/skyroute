@@ -26,4 +26,15 @@ public class KafkaTopicConfig {
                 .replicas(1)
                 .build();
     }
+
+    // Dead-letter topics carry very little traffic, so one partition is enough.
+    @Bean
+    public NewTopic flightEventsDeadLetterTopic() {
+        return TopicBuilder.name(KafkaTopics.FLIGHT_EVENTS_DLT).partitions(1).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic disruptionsDeadLetterTopic() {
+        return TopicBuilder.name(KafkaTopics.DISRUPTIONS_DLT).partitions(1).replicas(1).build();
+    }
 }
