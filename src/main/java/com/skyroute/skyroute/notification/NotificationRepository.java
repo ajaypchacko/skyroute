@@ -9,8 +9,11 @@ import java.util.List;
 
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
 
-    // Used by the "my notifications" endpoint in Phase 5.
+    // Used by "my notifications" (the passenger's own view).
     List<Notification> findByPassengerIdOrderByCreatedAtDesc(Long passengerId);
+
+    // Used by the admin "who was notified for this flight" view.
+    List<Notification> findByFlightIdOrderByCreatedAtDesc(Long flightId);
 
     /**
      * The heart of "never notify twice".

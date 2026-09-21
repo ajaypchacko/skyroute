@@ -96,11 +96,11 @@
   .board h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; }
   .board-note { font-size: 14px; color: var(--board-dim); }
   .board-scroll { overflow-x: auto; margin-top: 6px; }
-  table { width: 100%; border-collapse: collapse; min-width: 440px; }
-  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--board-line); white-space: nowrap; }
-  thead th { font-size: 14px; font-weight: 500; color: var(--board-dim); }
-  tbody th.flight, td.departs { font-family: var(--display); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  tbody th.flight { font-weight: 700; }
+  .board table { width: 100%; border-collapse: collapse; min-width: 440px; }
+  .board th, .board td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--board-line); white-space: nowrap; }
+  .board thead th { font-size: 14px; font-weight: 500; color: var(--board-dim); }
+  .board tbody th.flight, .board td.departs { font-family: var(--display); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .board tbody th.flight { font-weight: 700; }
   .was { color: var(--board-dim); font-size: 16px; font-weight: 500; }
   .new-time { color: var(--caution); }
   .status { font-size: 15px; font-weight: 500; }
@@ -182,7 +182,20 @@
   .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
   .reset-row { margin-top: 20px; }
 
-  .footer { margin-top: 36px; font-size: 14px; color: var(--ink-soft); max-width: 70ch; }
+    .recipients { margin-top: 14px; min-height: 0; }
+  .recipients .hint { margin: 0 0 8px; }
+
+  .table-scroll { overflow-x: auto; margin-top: 8px; }
+  .mini-table { width: 100%; border-collapse: collapse; min-width: 320px; font-size: 14px; }
+  .mini-table th, .mini-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #c7cdc3; white-space: nowrap; }
+  .mini-table thead th { font-weight: 600; color: var(--ink-soft); }
+  .mini-table .empty { color: var(--ink-soft); font-style: italic; white-space: normal; }
+
+  .passengers-details { margin-top: 22px; border-top: 1px solid #c7cdc3; padding-top: 12px; }
+  .passengers-details summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+  .passengers-details summary:hover { color: var(--sky-dark); }
+
+.footer { margin-top: 36px; font-size: 14px; color: var(--ink-soft); max-width: 70ch; }
   .footer a { color: var(--sky-dark); }
 
   @media (prefers-reduced-motion: reduce) {
@@ -267,6 +280,19 @@
       </div>
       <p class="message" id="adminMessage" role="status"></p>
       <p class="hint">Delays under 30 minutes change the board but send no text. Send the same update twice and nobody is texted twice.</p>
+
+      <div class="recipients" id="recipients" aria-live="polite"></div>
+
+      <details class="passengers-details" id="passengersDetails">
+        <summary>Registered passengers</summary>
+        <div class="table-scroll">
+          <table class="mini-table">
+            <caption class="sr-only">Registered passengers and the flight each is booked on</caption>
+            <thead><tr><th scope="col">Name</th><th scope="col">Mobile</th><th scope="col">Flight</th></tr></thead>
+            <tbody id="passengersBody"><tr><td colspan="3" class="empty">Enter the admin key, then open this panel.</td></tr></tbody>
+          </table>
+        </div>
+      </details>
 
       <div class="reset-row">
         <button class="btn btn-outline" id="resetBtn" type="button">Reset demo</button>
@@ -514,6 +540,7 @@
       lastCount = null;
       showPassengerView();
       await loadNotifications();
+      if ($('passengersDetails').open) loadPassengers();
     } catch (err) {
       setMessage('signupMessage', errorText(err), 'error');
     }
@@ -542,6 +569,40 @@
     return key;
   }
 
+  // Tracks the latest "send" click, so a slower earlier request can never overwrite
+  // the recipients box after a newer one has already started.
+  let recipientsToken = 0;
+
+  function renderRecipients(items, isFinal) {
+    const el = $('recipients');
+    if (items.length === 0) {
+      el.innerHTML = isFinal
+        ? '<p class="hint">No passengers were notified. Either nobody is booked on this flight, or the change was below the 30 minute disruption threshold.</p>'
+        : '<p class="hint">Checking who was notified\u2026</p>';
+      return;
+    }
+    const rows = items.map((i) =>
+      '<tr><td>' + esc(i.name) + '</td><td>' + esc(i.mobileNumber) + '</td><td>' + esc(stampFormat.format(new Date(i.createdAt))) + '</td></tr>'
+    ).join('');
+    el.innerHTML = '<p class="hint">Sent to ' + items.length + ' passenger' + (items.length === 1 ? '' : 's') + ':</p>'
+      + '<div class="table-scroll"><table class="mini-table"><thead><tr><th scope="col">Name</th><th scope="col">Mobile</th>'
+      + '<th scope="col">Sent</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  async function loadRecipients(flightNumber, key, sentAt, token, isFinal) {
+    try {
+      const items = await api('/api/admin/flights/' + encodeURIComponent(flightNumber) + '/notifications', {
+        headers: { 'X-API-Key': key }
+      });
+      if (token !== recipientsToken) return;   // a newer send has started; drop this result
+      const recent = items.filter((i) => new Date(i.createdAt) >= sentAt);
+      renderRecipients(recent, isFinal);
+    } catch (err) {
+      if (token !== recipientsToken) return;
+      if (isFinal) $('recipients').innerHTML = '<p class="message error">Could not check recipients.</p>';
+    }
+  }
+
   async function sendEvent(type) {
     const key = readKey();
     if (!key) return;
@@ -551,6 +612,12 @@
     if (type === 'DELAYED') body.delayMinutes = minutes;
 
     setMessage('adminMessage', '', '');
+    const token = ++recipientsToken;
+    $('recipients').innerHTML = '';
+    // A short buffer before "now", so a passenger notified a moment before this
+    // click (from a slightly earlier event) is never wrongly counted as new.
+    const sentAt = new Date(Date.now() - 1000);
+
     try {
       await api('/api/flight-events', {
         method: 'POST',
@@ -558,13 +625,42 @@
         body: JSON.stringify(body)
       });
       setMessage('adminMessage', SENT_TEXT[type](flightNumber, minutes), 'ok');
-      // Give Kafka and the consumers a moment, then refresh.
-      setTimeout(() => { loadFlights(); loadNotifications(); }, 700);
-      setTimeout(() => { loadFlights(); loadNotifications(); }, 2000);
+      // Give Kafka and the consumers a moment, then refresh the board and recipients.
+      loadRecipients(flightNumber, key, sentAt, token, false);
+      setTimeout(() => { loadFlights(); loadNotifications(); loadRecipients(flightNumber, key, sentAt, token, false); }, 900);
+      setTimeout(() => { loadFlights(); loadNotifications(); loadRecipients(flightNumber, key, sentAt, token, true); }, 2600);
     } catch (err) {
       setMessage('adminMessage', errorText(err), 'error');
     }
   }
+
+  // ---------- registered passengers panel ----------
+
+  async function loadPassengers() {
+    const key = $('adminKey').value;
+    const body = $('passengersBody');
+    if (!key) {
+      body.innerHTML = '<tr><td colspan="3" class="empty">Enter the admin key above first.</td></tr>';
+      return;
+    }
+    body.innerHTML = '<tr><td colspan="3" class="empty">Loading\u2026</td></tr>';
+    try {
+      const items = await api('/api/admin/passengers', { headers: { 'X-API-Key': key } });
+      if (items.length === 0) {
+        body.innerHTML = '<tr><td colspan="3" class="empty">No passengers registered yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map((p) =>
+        '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.mobileNumber) + '</td><td>' + esc(p.flightNumber) + '</td></tr>'
+      ).join('');
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="3" class="empty">' + esc(errorText(err)) + '</td></tr>';
+    }
+  }
+
+  $('passengersDetails').addEventListener('toggle', () => {
+    if ($('passengersDetails').open) loadPassengers();
+  });
 
   $('sendDelay').addEventListener('click', () => sendEvent('DELAYED'));
   $('cancelFlight').addEventListener('click', () => sendEvent('CANCELLED'));
