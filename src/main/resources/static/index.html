@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyRoute: flight disruption alerts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --concrete: #e4e7e2;
+    --paper: #f8f9f6;
+    --ink: #0f2a44;
+    --ink-soft: #4b6177;
+    --board: #0c2238;
+    --board-line: #20405f;
+    --board-text: #eaf1f8;
+    --board-dim: #9bb0c4;
+    --sky: #1b6fd1;
+    --sky-dark: #14559f;
+    --go: #4ade9a;
+    --caution: #f5b301;
+    --stop: #ff7a7a;
+    --go-ink: #17724a;
+    --stop-ink: #b3261e;
+    --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+    --text: "Barlow", "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    background: var(--concrete);
+    color: var(--ink);
+    font-family: var(--text);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead { margin-bottom: 26px; }
+  .brand { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .wordmark {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 46px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+  }
+  .live { font-size: 14px; color: var(--go-ink); }
+  .live::before { content: "\25CF\00a0"; }
+  .live.offline { color: var(--stop-ink); }
+  .live.offline::before { content: "\2715\00a0"; }
+  .lede { margin: 8px 0 0; font-size: 20px; max-width: 46ch; }
+
+  /* ---------- layout ---------- */
+  .layout {
+    display: grid;
+    gap: 28px 32px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, 400px);
+    grid-template-areas:
+      "board passenger"
+      "board ops";
+    align-items: start;
+  }
+  .area-board { grid-area: board; }
+  .area-passenger { grid-area: passenger; }
+  .area-ops { grid-area: ops; }
+
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "passenger" "ops" "board";
+    }
+    .wordmark { font-size: 38px; }
+  }
+
+  /* ---------- departures board ---------- */
+  .board {
+    background: var(--board);
+    color: var(--board-text);
+    border-radius: 6px;
+    padding: 18px 20px 10px;
+  }
+  .board-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .board h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; }
+  .board-note { font-size: 14px; color: var(--board-dim); }
+  .board-scroll { overflow-x: auto; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; min-width: 440px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--board-line); white-space: nowrap; }
+  thead th { font-size: 14px; font-weight: 500; color: var(--board-dim); }
+  tbody th.flight, td.departs { font-family: var(--display); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  tbody th.flight { font-weight: 700; }
+  .was { color: var(--board-dim); font-size: 16px; font-weight: 500; }
+  .new-time { color: var(--caution); }
+  .status { font-size: 15px; font-weight: 500; }
+  .status::before { margin-right: 8px; }
+  .status-ok::before { content: "\25CF"; color: var(--go); }
+  .status-late { color: var(--caution); }
+  .status-late::before { content: "\25B2"; }
+  .status-stop { color: var(--stop); }
+  .status-stop::before { content: "\2715"; }
+  tr.changed td, tr.changed th { animation: flash 1.8s ease-out; }
+  @keyframes flash { from { background: rgba(245, 179, 1, 0.38); } to { background: transparent; } }
+
+  /* ---------- passenger phone ---------- */
+  .phone {
+    border: 10px solid var(--ink);
+    border-radius: 34px;
+    background: var(--paper);
+    overflow: hidden;
+    min-height: 360px;
+  }
+  .phone-bar {
+    background: var(--ink);
+    color: #fff;
+    text-align: center;
+    font-size: 14px;
+    padding: 2px 16px 10px;
+  }
+  .phone-body { padding: 16px 18px 20px; }
+  .phone-heading { font-family: var(--display); font-weight: 600; font-size: 26px; line-height: 1.15; margin: 0 0 12px; }
+
+  label { display: block; font-size: 14px; font-weight: 500; margin: 12px 0 4px; }
+  input, select {
+    width: 100%;
+    font: inherit;
+    color: var(--ink);
+    background: #fff;
+    padding: 10px 12px;
+    border: 1px solid #93a3b3;
+    border-radius: 4px;
+  }
+  :focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+  .hint { font-size: 14px; color: var(--ink-soft); margin: 8px 0 0; }
+
+  .btn {
+    font: inherit;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--sky); color: #fff; }
+  .btn-primary:hover { background: var(--sky-dark); }
+  .btn-outline { background: transparent; border-color: var(--ink); color: var(--ink); }
+  .btn-outline:hover { background: rgba(15, 42, 68, 0.08); }
+  .btn-stop { background: transparent; border-color: var(--stop-ink); color: var(--stop-ink); }
+  .btn-stop:hover { background: rgba(179, 38, 30, 0.08); }
+  .btn-link {
+    background: none; border: 0; padding: 0; font: inherit; color: var(--sky-dark);
+    text-decoration: underline; cursor: pointer;
+  }
+  .form-actions { margin-top: 16px; }
+
+  .message { min-height: 1.5em; margin: 10px 0 0; font-size: 15px; }
+  .message.error { color: var(--stop-ink); }
+  .message.ok { color: var(--go-ink); }
+
+  .bubbles { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { background: #dceafb; border-radius: 18px 18px 18px 4px; padding: 10px 14px; max-width: 94%; }
+  .bubble p { margin: 0; }
+  .bubble time { display: block; font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .bubble.arrived { animation: arrive 0.45s ease-out; }
+  @keyframes arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .empty { color: var(--ink-soft); }
+
+  /* ---------- operations desk ---------- */
+  .ops { border-top: 5px solid var(--ink); padding-top: 12px; }
+  .ops h2 { margin: 0 0 4px; font-family: var(--display); font-weight: 600; font-size: 30px; }
+  .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .reset-row { margin-top: 20px; }
+
+  .footer { margin-top: 36px; font-size: 14px; color: var(--ink-soft); max-width: 70ch; }
+  .footer a { color: var(--sky-dark); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="brand">
+      <span class="wordmark">SkyRoute</span>
+      <span class="live" id="live" role="status">Connecting</span>
+    </div>
+    <p class="lede">Delay a flight and every booked passenger gets one text. Never two.</p>
+  </header>
+
+  <main class="layout">
+
+    <!-- Passenger -->
+    <section class="area-passenger" aria-labelledby="phoneTitle">
+      <div class="phone">
+        <div class="phone-bar" id="phoneTitle">Passenger phone</div>
+        <div class="phone-body">
+
+          <div id="signupView">
+            <h2 class="phone-heading">Get alerts for your flight</h2>
+            <form id="signupForm">
+              <label for="signupName">Name</label>
+              <input id="signupName" maxlength="100" autocomplete="off" required>
+
+              <label for="signupFlight">Flight</label>
+              <select id="signupFlight" required></select>
+
+              <label for="signupMobile">Mobile number</label>
+              <input id="signupMobile" inputmode="tel" autocomplete="off" placeholder="+61412345678"
+                     pattern="\+614[0-9]{8}" title="Use the format +614 followed by 8 digits" required>
+              <p class="hint">Use a made-up number. No real text is sent.</p>
+
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Register for alerts</button>
+              </div>
+              <p class="message" id="signupMessage" role="status"></p>
+            </form>
+          </div>
+
+          <div id="thread" hidden>
+            <h2 class="phone-heading" id="threadTitle"></h2>
+            <button class="btn-link" id="forgetBtn" type="button">Register someone else</button>
+            <ol class="bubbles" id="notifications" aria-live="polite"></ol>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Operations -->
+    <section class="area-ops ops" aria-labelledby="opsTitle">
+      <h2 id="opsTitle">Operations desk</h2>
+
+      <label for="adminFlight">Flight</label>
+      <select id="adminFlight"></select>
+
+      <label for="adminDelay">Delay</label>
+      <select id="adminDelay">
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="45" selected>45 minutes</option>
+        <option value="60">60 minutes</option>
+        <option value="90">90 minutes</option>
+        <option value="120">120 minutes</option>
+      </select>
+
+      <label for="adminKey">Admin key</label>
+      <input id="adminKey" type="password" autocomplete="off">
+
+      <div class="button-row">
+        <button class="btn btn-primary" id="sendDelay" type="button">Send delay</button>
+        <button class="btn btn-stop" id="cancelFlight" type="button">Cancel flight</button>
+        <button class="btn btn-outline" id="markOnTime" type="button">Mark on time</button>
+      </div>
+      <p class="message" id="adminMessage" role="status"></p>
+      <p class="hint">Delays under 30 minutes change the board but send no text. Send the same update twice and nobody is texted twice.</p>
+
+      <div class="reset-row">
+        <button class="btn btn-outline" id="resetBtn" type="button">Reset demo</button>
+      </div>
+    </section>
+
+    <!-- Board -->
+    <section class="area-board board" aria-labelledby="boardTitle">
+      <div class="board-head">
+        <h2 id="boardTitle">Departures</h2>
+        <span class="board-note">Times in your time zone</span>
+      </div>
+      <div class="board-scroll">
+        <table>
+          <caption class="sr-only">Flight departures and their status</caption>
+          <thead>
+            <tr>
+              <th scope="col">Flight</th>
+              <th scope="col">Route</th>
+              <th scope="col">Departs</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody id="boardBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <p class="footer">
+    SkyRoute is a fictional airline. Every flight, passenger and phone number here is simulated, and no real messages are sent.
+    Built with Java, Spring Boot, Kafka and PostgreSQL.
+    <a href="https://github.com/ajaypchacko/skyroute">Source code on GitHub</a>.
+  </p>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const PASSENGER_KEY = 'skyroute.passenger';
+  const ADMIN_KEY = 'skyroute.adminKey';
+
+  // Browser storage can be blocked, so every access is wrapped.
+  const safe = {
+    read(storage, key) { try { return storage.getItem(key); } catch (e) { return null; } },
+    write(storage, key, value) { try { storage.setItem(key, value); } catch (e) { /* storage unavailable */ } },
+    remove(storage, key) { try { storage.removeItem(key); } catch (e) { /* storage unavailable */ } }
+  };
+
+  const esc = (value) => String(value).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // ---------- small helpers ----------
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, { cache: 'no-store', ...options });
+    const text = await response.text();
+    let body = null;
+    if (text) { try { body = JSON.parse(text); } catch (e) { body = text; } }
+    if (!response.ok) {
+      const detail = body && typeof body === 'object' ? (body.detail || body.message) : '';
+      const error = new Error(detail || 'Request failed (' + response.status + ')');
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  }
+
+  function errorText(err) {
+    if (err.status === 401) return 'The admin key is missing or wrong.';
+    if (err.status) return err.message;
+    return 'Cannot reach the server.';
+  }
+
+  function setMessage(id, text, kind) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = 'message' + (kind ? ' ' + kind : '');
+  }
+
+  function setLive(ok) {
+    const el = $('live');
+    el.textContent = ok ? 'Live' : 'Cannot reach the server';
+    el.classList.toggle('offline', !ok);
+  }
+
+  const timeFormat = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const dayFormat = new Intl.DateTimeFormat([], { weekday: 'short' });
+  const stampFormat = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+  function formatDeparture(date) {
+    const time = timeFormat.format(date);
+    return date.toDateString() === new Date().toDateString() ? time : dayFormat.format(date) + ' ' + time;
+  }
+
+  // ---------- departures board ----------
+
+  const previousStates = new Map();
+
+  function renderBoard(flights) {
+    const rows = flights.map((f) => {
+      const state = f.status + '|' + f.delayMinutes;
+      const changed = previousStates.has(f.flightNumber) && previousStates.get(f.flightNumber) !== state;
+      previousStates.set(f.flightNumber, state);
+
+      const scheduled = new Date(f.scheduledDeparture);
+      let departs;
+      let status;
+      if (f.status === 'CANCELLED') {
+        departs = '<s class="was">' + esc(formatDeparture(scheduled)) + '</s>';
+        status = '<span class="status status-stop">Cancelled</span>';
+      } else if (f.status === 'DELAYED' && f.delayMinutes > 0) {
+        const updated = new Date(scheduled.getTime() + f.delayMinutes * 60000);
+        departs = '<span class="new-time">' + esc(formatDeparture(updated)) + '</span> '
+                + '<s class="was">' + esc(formatDeparture(scheduled)) + '</s>';
+        status = '<span class="status status-late">Delayed ' + esc(f.delayMinutes) + ' min</span>';
+      } else {
+        departs = esc(formatDeparture(scheduled));
+        status = '<span class="status status-ok">On time</span>';
+      }
+
+      return '<tr class="' + (changed ? 'changed' : '') + '">'
+        + '<th scope="row" class="flight">' + esc(f.flightNumber) + '</th>'
+        + '<td>' + esc(f.origin) + ' to ' + esc(f.destination) + '</td>'
+        + '<td class="departs">' + departs + '</td>'
+        + '<td>' + status + '</td></tr>';
+    });
+    $('boardBody').innerHTML = rows.join('');
+  }
+
+  // Fill both flight dropdowns once (and again only if the number of flights changes).
+  function fillFlightSelects(flights) {
+    [$('adminFlight'), $('signupFlight')].forEach((select) => {
+      if (select.options.length === flights.length) return;
+      const keep = select.value;
+      select.innerHTML = flights.map((f) =>
+        '<option value="' + esc(f.flightNumber) + '">' + esc(f.flightNumber) + ' ' + esc(f.origin) + ' to ' + esc(f.destination) + '</option>'
+      ).join('');
+      if (keep) select.value = keep;
+    });
+  }
+
+  async function loadFlights() {
+    if (document.hidden) return;
+    try {
+      const flights = await api('/api/flights');
+      renderBoard(flights);
+      fillFlightSelects(flights);
+      setLive(true);
+    } catch (err) {
+      setLive(false);
+    }
+  }
+
+  // ---------- passenger phone ----------
+
+  let passenger = readPassenger();
+  let lastCount = null;
+
+  function readPassenger() {
+    const raw = safe.read(localStorage, PASSENGER_KEY);
+    if (!raw) return null;
+    try {
+      const p = JSON.parse(raw);
+      return p && p.passengerId ? p : null;
+    } catch (e) { return null; }
+  }
+
+  function showPassengerView() {
+    const registered = passenger !== null;
+    $('signupView').hidden = registered;
+    $('thread').hidden = !registered;
+    if (registered) {
+      $('threadTitle').textContent = 'Alerts for ' + passenger.name + ' on ' + passenger.flightNumber;
+    }
+  }
+
+  function forgetPassenger(note) {
+    passenger = null;
+    lastCount = null;
+    safe.remove(localStorage, PASSENGER_KEY);
+    $('notifications').replaceChildren();
+    showPassengerView();
+    setMessage('signupMessage', note || '', note ? 'error' : '');
+  }
+
+  function renderNotifications(items) {
+    const list = $('notifications');
+    if (lastCount === items.length && list.childElementCount > 0) return; // nothing new
+    const newCount = lastCount === null ? 0 : Math.max(0, items.length - lastCount);
+    lastCount = items.length;
+    list.replaceChildren();
+
+    if (items.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'No alerts yet. A text appears here when your flight is cancelled or delayed by 30 minutes or more.';
+      list.append(empty);
+      return;
+    }
+
+    items.forEach((item, index) => {
+      const li = document.createElement('li');
+      li.className = 'bubble' + (index < newCount ? ' arrived' : '');
+      const text = document.createElement('p');
+      text.textContent = item.message;
+      const time = document.createElement('time');
+      time.dateTime = item.createdAt;
+      time.textContent = stampFormat.format(new Date(item.createdAt));
+      li.append(text, time);
+      list.append(li);
+    });
+  }
+
+  async function loadNotifications() {
+    if (!passenger || document.hidden) return;
+    try {
+      const items = await api('/api/passengers/' + encodeURIComponent(passenger.passengerId) + '/notifications');
+      renderNotifications(items);
+    } catch (err) {
+      if (err.status === 404) {
+        forgetPassenger('The demo was reset, so this passenger no longer exists. Register again.');
+      }
+    }
+  }
+
+  $('signupForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setMessage('signupMessage', '', '');
+    try {
+      const result = await api('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: $('signupName').value.trim(),
+          flightNumber: $('signupFlight').value,
+          mobileNumber: $('signupMobile').value.trim()
+        })
+      });
+      passenger = { passengerId: result.passengerId, name: result.name, flightNumber: result.flightNumber };
+      safe.write(localStorage, PASSENGER_KEY, JSON.stringify(passenger));
+      lastCount = null;
+      showPassengerView();
+      await loadNotifications();
+    } catch (err) {
+      setMessage('signupMessage', errorText(err), 'error');
+    }
+  });
+
+  $('forgetBtn').addEventListener('click', () => forgetPassenger(''));
+
+  // ---------- operations desk ----------
+
+  const savedKey = safe.read(sessionStorage, ADMIN_KEY);
+  if (savedKey) $('adminKey').value = savedKey;
+
+  const SENT_TEXT = {
+    DELAYED: (flight, minutes) => 'Sent a ' + minutes + ' minute delay for ' + flight + '.',
+    CANCELLED: (flight) => 'Cancelled ' + flight + '.',
+    ON_TIME: (flight) => 'Marked ' + flight + ' on time.'
+  };
+
+  function readKey() {
+    const key = $('adminKey').value;
+    if (!key) {
+      setMessage('adminMessage', 'Enter the admin key first.', 'error');
+      return null;
+    }
+    safe.write(sessionStorage, ADMIN_KEY, key); // kept for this browser tab only
+    return key;
+  }
+
+  async function sendEvent(type) {
+    const key = readKey();
+    if (!key) return;
+    const flightNumber = $('adminFlight').value;
+    const body = { flightNumber: flightNumber, type: type };
+    const minutes = Number($('adminDelay').value);
+    if (type === 'DELAYED') body.delayMinutes = minutes;
+
+    setMessage('adminMessage', '', '');
+    try {
+      await api('/api/flight-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+        body: JSON.stringify(body)
+      });
+      setMessage('adminMessage', SENT_TEXT[type](flightNumber, minutes), 'ok');
+      // Give Kafka and the consumers a moment, then refresh.
+      setTimeout(() => { loadFlights(); loadNotifications(); }, 700);
+      setTimeout(() => { loadFlights(); loadNotifications(); }, 2000);
+    } catch (err) {
+      setMessage('adminMessage', errorText(err), 'error');
+    }
+  }
+
+  $('sendDelay').addEventListener('click', () => sendEvent('DELAYED'));
+  $('cancelFlight').addEventListener('click', () => sendEvent('CANCELLED'));
+  $('markOnTime').addEventListener('click', () => sendEvent('ON_TIME'));
+
+  $('resetBtn').addEventListener('click', async () => {
+    if (!confirm('Reset the demo? This removes registered passengers and all notifications, and puts every flight back on time.')) return;
+    const key = readKey();
+    if (!key) return;
+    try {
+      await api('/api/admin/reset', { method: 'POST', headers: { 'X-API-Key': key } });
+      setMessage('adminMessage', 'Demo reset.', 'ok');
+      loadFlights();
+      loadNotifications();
+    } catch (err) {
+      setMessage('adminMessage', errorText(err), 'error');
+    }
+  });
+
+  // ---------- start ----------
+
+  showPassengerView();
+  loadFlights();
+  loadNotifications();
+  setInterval(loadFlights, 3000);
+  setInterval(loadNotifications, 2000);
+})();
+</script>
+</body>
+</html>
