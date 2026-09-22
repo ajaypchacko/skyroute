@@ -1,0 +1,90 @@
+# SkyRoute production deployment (AWS EC2).
+# Differences from the local docker-compose.yml:
+#   - "app" pulls the pre-built image from GHCR instead of building from source
+#     (the image was already built and tested by GitHub Actions in Phase 9)
+#   - Secrets come from a .env file on the server, never committed to Git
+#   - Kafka UI is not published to the internet (debug via SSH tunnel if needed)
+#   - Kafka's JVM heap is capped, since this runs on a small instance
+#
+# Start:  docker compose -f docker-compose.prod.yml up -d
+# Stop:   docker compose -f docker-compose.prod.yml down
+# Logs:   docker compose -f docker-compose.prod.yml logs -f app
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: skyroute-postgres
+    environment:
+      POSTGRES_DB: skyroute
+      POSTGRES_USER: skyroute
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skyroute -d skyroute"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No "ports:" here on purpose: Postgres is reachable by other containers on
+    # this Docker network, but not from the internet.
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: skyroute-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Caps Kafka's JVM heap at 512MB, leaving room for Postgres and the app
+      # on a small instance. Without this, Kafka assumes a much bigger machine.
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    # No HOST listener and no "ports:" here: nothing outside this server's
+    # Docker network can reach Kafka directly, on purpose.
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: skyroute-kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+    # Deliberately no "ports:" mapping, so Kafka UI is not exposed to the internet.
+    # To use it, open an SSH tunnel from your laptop:
+    #   ssh -i skyroute-key.pem -L 8081:localhost:8081 ubuntu@<PUBLIC_IP>
+    # then browse to http://localhost:8081 on YOUR machine.
+
+  app:
+    image: ghcr.io/ajaypchacko/skyroute:latest   # pulled, not built - see Phase 9
+    container_name: skyroute-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"          # the only port reachable from the internet
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/skyroute
+      DB_USERNAME: skyroute
+      DB_PASSWORD: ${DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+
+volumes:
+  postgres-data:
