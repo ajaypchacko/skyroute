@@ -143,6 +143,14 @@
   }
   :focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
   .hint { font-size: 14px; color: var(--ink-soft); margin: 8px 0 0; }
+  .hint code {
+    background: rgba(15, 42, 68, 0.08);
+    border: 1px solid #c7cdc3;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 13px;
+    color: var(--ink);
+  }
 
   .btn {
     font: inherit;
@@ -272,6 +280,7 @@
 
       <label for="adminKey">Admin key</label>
       <input id="adminKey" type="password" autocomplete="off">
+      <p class="hint">Demo key: <code>skyroute-demo-2026</code></p>
 
       <div class="button-row">
         <button class="btn btn-primary" id="sendDelay" type="button">Send delay</button>
